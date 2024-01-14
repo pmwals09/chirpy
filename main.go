@@ -19,9 +19,17 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits)))
+	w.Write([]byte(fmt.Sprintf(`
+<html>
+
+<body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+</body>
+
+</html>`, cfg.fileserverHits)))
 }
 
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
@@ -44,10 +52,14 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	apiRouter.Get("/metrics", apiConfig.metricsHandler)
-	apiRouter.HandleFunc("/reset", apiConfig.resetHandler)
 
 	r.Mount("/api", apiRouter)
+
+	adminRouter := chi.NewRouter()
+	adminRouter.Get("/metrics", apiConfig.metricsHandler)
+	adminRouter.HandleFunc("/reset", apiConfig.resetHandler)
+
+	r.Mount("/admin", adminRouter)
 
 	corsRouter := corsMiddleware(r)
 	server := http.Server{
