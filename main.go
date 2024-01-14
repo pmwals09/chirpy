@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -51,6 +52,47 @@ func main() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+	})
+	apiRouter.Post("/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
+		type chirp struct {
+			Body string `json:"body"`
+		}
+		type errorResponse struct {
+			Error string `json:"error"`
+		}
+		type successResponse struct {
+			Valid bool `json:"valid"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		newChirp := chirp{}
+		err := decoder.Decode(&newChirp)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			decodeError := errorResponse{"Something went wrong"}
+			data, _ := json.Marshal(decodeError)
+			w.Write([]byte(data))
+			return
+		}
+
+		if len(newChirp.Body) > 140 {
+			lengthError := errorResponse{"Chirp is too long"}
+			data, err := json.Marshal(lengthError)
+			if err != nil {
+				marshalError := errorResponse{"Something went wrong"}
+				data, _ := json.Marshal(marshalError)
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(data))
+				return
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(data))
+			return
+		}
+
+		data, _ := json.Marshal(successResponse{true})
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(data))
+		return
 	})
 
 	r.Mount("/api", apiRouter)
