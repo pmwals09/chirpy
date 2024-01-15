@@ -8,10 +8,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/pmwals09/chirpy/internal/database"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type errorResponse struct {
 	Error string `json:"error"`
+}
+
+type userRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type userResponse struct {
+	Email string `json:"email"`
+	Id    int    `json:"id"`
 }
 
 func getApiRouter(db *database.DB) http.Handler {
@@ -28,6 +39,9 @@ func getApiRouter(db *database.DB) http.Handler {
 	})
 	apiRouter.Post("/users", func(w http.ResponseWriter, r *http.Request) {
 		userPostHandler(w, r, db)
+	})
+	apiRouter.Post("/login", func(w http.ResponseWriter, r *http.Request) {
+		loginPostHandler(w, r, db)
 	})
 
 	return apiRouter
@@ -114,24 +128,65 @@ func chirpGetByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB
 func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 	decoder := json.NewDecoder(r.Body)
 	defer r.Body.Close()
-	user := database.User{}
-	err := decoder.Decode(&user)
+	req := userRequest{}
+	err := decoder.Decode(&req)
 	if err != nil {
 		respondWithErr(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
-	u, err := db.CreateUser(user.Email)
+	pwHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
-	data, err := json.Marshal(u)
+	u, err := db.CreateUser(req.Email, string(pwHash))
+	if err != nil {
+		if errors.Is(err, database.ErrUserExists{}) {
+			respondWithErr(w, http.StatusInternalServerError, "A user with that email already exists")
+			return
+		} else {
+			respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+			return
+		}
+	}
+	data, err := json.Marshal(userResponse{Email: u.Email, Id: u.Id})
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(data))
+	return
+}
+
+func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+	req := userRequest{}
+	err := decoder.Decode(&req)
+	if err != nil {
+		respondWithErr(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+	user, err := db.GetUserByEmail(req.Email)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	data, err := json.Marshal(userResponse{Email: user.Email, Id: user.Id})
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(data))
 	return
 }

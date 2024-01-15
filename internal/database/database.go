@@ -25,6 +25,12 @@ func (e ErrChirpNotFound) Error() string {
 	return "Chirp not found in database"
 }
 
+type ErrUserExists struct{}
+
+func (e ErrUserExists) Error() string {
+	return "User already exists in database"
+}
+
 func NewDB(path string) (*DB, error) {
 	db := DB{path: path, mu: &sync.RWMutex{}}
 	err := db.ensureDB()
@@ -86,13 +92,16 @@ func (db *DB) GetChirpById(id string) (Chirp, error) {
 	}
 }
 
-func (db *DB) CreateUser(email string) (User, error) {
-	user := User{Email: email}
+func (db *DB) CreateUser(email string, pwHash string) (User, error) {
+	user := User{Email: email, PasswordHash: pwHash}
 	dbStructure, err := db.loadDB()
 	if err != nil {
 		return user, err
 	}
 	for _, u := range dbStructure.Users {
+		if u.Email == user.Email {
+			return user, ErrUserExists{}
+		}
 		if u.Id > user.Id {
 			user.Id = u.Id
 		}
@@ -104,6 +113,19 @@ func (db *DB) CreateUser(email string) (User, error) {
 		return user, err
 	}
 	return user, nil
+}
+
+func (db *DB) GetUserByEmail(email string) (User, error) {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+	for _, u := range dbStructure.Users {
+		if u.Email == email {
+			return u, nil
+		}
+	}
+	return User{}, errors.New("User not found")
 }
 
 func (db *DB) ensureDB() error {
