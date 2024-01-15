@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,16 @@ import (
 )
 
 func main() {
+	dbg := flag.Bool("debug", false, "Enable debug mode")
+	flag.Parse()
+	if *dbg {
+		err := os.Remove("./database.json")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(3)
+			return
+		}
+	}
 	r := chi.NewRouter()
 	apiConfig := apiConfig{}
 	db, err := database.NewDB("./database.json")
