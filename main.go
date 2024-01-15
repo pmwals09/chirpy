@@ -1,45 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
-
-type apiConfig struct {
-	fileserverHits int
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits += 1
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf(`
-<html>
-
-<body>
-    <h1>Welcome, Chirpy Admin</h1>
-    <p>Chirpy has been visited %d times!</p>
-</body>
-
-</html>`, cfg.fileserverHits)))
-}
-
-func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits = 0
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
-}
 
 func main() {
 	r := chi.NewRouter()
@@ -48,62 +15,9 @@ func main() {
 	r.Handle("/app/*", fsHandler)
 	r.Handle("/app", fsHandler)
 
-	apiRouter := chi.NewRouter()
-	apiRouter.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-	apiRouter.Post("/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
-		type chirp struct {
-			Body string `json:"body"`
-		}
-		type errorResponse struct {
-			Error string `json:"error"`
-		}
-		type successResponse struct {
-			CleanedBody string `json:"cleaned_body"`
-		}
-		decoder := json.NewDecoder(r.Body)
-		newChirp := chirp{}
-		err := decoder.Decode(&newChirp)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			decodeError := errorResponse{"Something went wrong"}
-			data, _ := json.Marshal(decodeError)
-			w.Write([]byte(data))
-			return
-		}
+	r.Mount("/api", getApiRouter())
 
-		if len(newChirp.Body) > 140 {
-			lengthError := errorResponse{"Chirp is too long"}
-			data, err := json.Marshal(lengthError)
-			if err != nil {
-				marshalError := errorResponse{"Something went wrong"}
-				data, _ := json.Marshal(marshalError)
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(data))
-				return
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(data))
-			return
-		}
-
-		cleanedBody := cleanChirp(newChirp.Body)
-		data, _ := json.Marshal(successResponse{cleanedBody})
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(data))
-		return
-	})
-
-	r.Mount("/api", apiRouter)
-
-	adminRouter := chi.NewRouter()
-	adminRouter.Get("/metrics", apiConfig.metricsHandler)
-	adminRouter.HandleFunc("/reset", apiConfig.resetHandler)
-
-	r.Mount("/admin", adminRouter)
+	r.Mount("/admin", getAdminRouter(&apiConfig))
 
 	corsRouter := corsMiddleware(r)
 	server := http.Server{
@@ -127,24 +41,4 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func cleanChirp(chirp string) string {
-	dirtyWords := []string{"kerfuffle", "sharbert", "fornax"}
-	out := make([]string, 0)
-	for _, tok := range strings.Fields(chirp) {
-		isDirtyWord := false
-		for _, w := range dirtyWords {
-			if strings.ToLower(tok) == strings.ToLower(w) {
-				isDirtyWord = true
-				break
-			}
-		}
-		if isDirtyWord {
-			out = append(out, "****")
-		} else {
-			out = append(out, tok)
-		}
-	}
-	return strings.Join(out, " ")
 }
