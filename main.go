@@ -3,19 +3,26 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"strings"
+	"os"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/pmwals09/chirpy/internal/database"
 )
 
 func main() {
 	r := chi.NewRouter()
 	apiConfig := apiConfig{}
+	db, err := database.NewDB("./database.json")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+		return
+	}
 	fsHandler := apiConfig.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("."))))
 	r.Handle("/app/*", fsHandler)
 	r.Handle("/app", fsHandler)
 
-	r.Mount("/api", getApiRouter())
+	r.Mount("/api", getApiRouter(db))
 
 	r.Mount("/admin", getAdminRouter(&apiConfig))
 
@@ -24,9 +31,11 @@ func main() {
 		Addr:    ":8080",
 		Handler: corsRouter,
 	}
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil {
 		fmt.Println(err)
+		os.Exit(2)
+		return
 	}
 }
 

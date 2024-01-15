@@ -6,12 +6,22 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/pmwals09/chirpy/internal/database"
 )
 
-func getApiRouter() http.Handler {
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func getApiRouter(db *database.DB) http.Handler {
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", healthzHandler)
-	apiRouter.Post("/validate_chirp", validateChirpHandler)
+	apiRouter.Post("/chirps", func(w http.ResponseWriter, r *http.Request) {
+		chirpPostHandler(w, r, db)
+	})
+	apiRouter.Get("/chirps", func(w http.ResponseWriter, r *http.Request) {
+		chirpGetHandler(w, r, db)
+	})
 
 	return apiRouter
 }
@@ -22,47 +32,53 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func validateChirpHandler(w http.ResponseWriter, r *http.Request) {
-	type chirp struct {
-		Body string `json:"body"`
-	}
-	type errorResponse struct {
-		Error string `json:"error"`
-	}
-	type successResponse struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
+func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 	decoder := json.NewDecoder(r.Body)
-	newChirp := chirp{}
+	newChirp := database.Chirp{}
 	err := decoder.Decode(&newChirp)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		decodeError := errorResponse{"Something went wrong"}
-		data, _ := json.Marshal(decodeError)
-		w.Write([]byte(data))
+		respondWithErr(w, http.StatusBadRequest, "Something went wrong")
 		return
 	}
 
 	if len(newChirp.Body) > 140 {
-		lengthError := errorResponse{"Chirp is too long"}
-		data, err := json.Marshal(lengthError)
-		if err != nil {
-			marshalError := errorResponse{"Something went wrong"}
-			data, _ := json.Marshal(marshalError)
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(data))
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(data))
+		respondWithErr(w, http.StatusBadRequest, "Chirp is too long")
 		return
 	}
 
 	cleanedBody := cleanChirp(newChirp.Body)
-	data, _ := json.Marshal(successResponse{cleanedBody})
-	w.WriteHeader(http.StatusOK)
+	c, err := db.CreateChirp(cleanedBody)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	data, err := json.Marshal(c)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(data))
 	return
+}
+
+func chirpGetHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+	chirps, err := db.GetChirps()
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	data, err := json.Marshal(chirps)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+  w.Header().Set("Content-Type", "application/json; charset=utf-8")
+  w.WriteHeader(http.StatusOK)
+  w.Write([]byte(data))
+  return
 }
 
 func cleanChirp(chirp string) string {
@@ -83,4 +99,11 @@ func cleanChirp(chirp string) string {
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+func respondWithErr(w http.ResponseWriter, code int, msg string) {
+	err := errorResponse{msg}
+	data, _ := json.Marshal(err)
+	w.WriteHeader(code)
+	w.Write([]byte(data))
 }
