@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -21,6 +22,9 @@ func getApiRouter(db *database.DB) http.Handler {
 	})
 	apiRouter.Get("/chirps", func(w http.ResponseWriter, r *http.Request) {
 		chirpGetHandler(w, r, db)
+	})
+	apiRouter.Get("/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		chirpGetByIdHandler(w, r, db)
 	})
 
 	return apiRouter
@@ -75,10 +79,33 @@ func chirpGetHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
-  w.Header().Set("Content-Type", "application/json; charset=utf-8")
-  w.WriteHeader(http.StatusOK)
-  w.Write([]byte(data))
-  return
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(data))
+	return
+}
+
+func chirpGetByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+	chirpID := chi.URLParam(r, "chirpID")
+	chirp, err := db.GetChirpById(chirpID)
+	if err != nil {
+		if errors.Is(err, database.ErrChirpNotFound{}) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		} else {
+			respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+			return
+		}
+	}
+	data, err := json.Marshal(chirp)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(data))
+	return
 }
 
 func cleanChirp(chirp string) string {
