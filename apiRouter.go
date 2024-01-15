@@ -26,6 +26,9 @@ func getApiRouter(db *database.DB) http.Handler {
 	apiRouter.Get("/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
 		chirpGetByIdHandler(w, r, db)
 	})
+	apiRouter.Post("/users", func(w http.ResponseWriter, r *http.Request) {
+		userPostHandler(w, r, db)
+	})
 
 	return apiRouter
 }
@@ -104,6 +107,31 @@ func chirpGetByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(data))
+	return
+}
+
+func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
+	user := database.User{}
+	err := decoder.Decode(&user)
+	if err != nil {
+		respondWithErr(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+	u, err := db.CreateUser(user.Email)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	data, err := json.Marshal(u)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(data))
 	return
 }

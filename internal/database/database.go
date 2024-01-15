@@ -16,6 +16,7 @@ type DB struct {
 
 type DBStructure struct {
 	Chirps map[int]Chirp `json:"chirps"`
+	Users  map[int]User  `json:"users"`
 }
 
 type ErrChirpNotFound struct{}
@@ -69,9 +70,7 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 }
 
 func (db *DB) GetChirpById(id string) (Chirp, error) {
-	db.mu.RLock()
 	dbStructure, err := db.loadDB()
-	db.mu.RUnlock()
 	if err != nil {
 		return Chirp{}, err
 	}
@@ -87,9 +86,29 @@ func (db *DB) GetChirpById(id string) (Chirp, error) {
 	}
 }
 
+func (db *DB) CreateUser(email string) (User, error) {
+	user := User{Email: email}
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return user, err
+	}
+	for _, u := range dbStructure.Users {
+		if u.Id > user.Id {
+			user.Id = u.Id
+		}
+	}
+	user.Id += 1
+	dbStructure.Users[user.Id] = user
+	err = db.writeDB(dbStructure)
+	if err != nil {
+		return user, err
+	}
+	return user, nil
+}
+
 func (db *DB) ensureDB() error {
 	if _, err := os.Stat(db.path); errors.Is(err, os.ErrNotExist) {
-		err := os.WriteFile(db.path, []byte("{\"chirps\": {}}"), 0644)
+		err := os.WriteFile(db.path, []byte("{\"chirps\": {}, \"users\": {}}"), 0644)
 		if err != nil {
 			return err
 		}
