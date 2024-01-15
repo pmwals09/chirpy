@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -61,7 +62,7 @@ func main() {
 			Error string `json:"error"`
 		}
 		type successResponse struct {
-			Valid bool `json:"valid"`
+			CleanedBody string `json:"cleaned_body"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		newChirp := chirp{}
@@ -89,7 +90,8 @@ func main() {
 			return
 		}
 
-		data, _ := json.Marshal(successResponse{true})
+		cleanedBody := cleanChirp(newChirp.Body)
+		data, _ := json.Marshal(successResponse{cleanedBody})
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(data))
 		return
@@ -125,4 +127,24 @@ func corsMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func cleanChirp(chirp string) string {
+	dirtyWords := []string{"kerfuffle", "sharbert", "fornax"}
+	out := make([]string, 0)
+	for _, tok := range strings.Fields(chirp) {
+		isDirtyWord := false
+		for _, w := range dirtyWords {
+			if strings.ToLower(tok) == strings.ToLower(w) {
+				isDirtyWord = true
+				break
+			}
+		}
+		if isDirtyWord {
+			out = append(out, "****")
+		} else {
+			out = append(out, tok)
+		}
+	}
+	return strings.Join(out, " ")
 }
