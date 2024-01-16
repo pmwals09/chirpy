@@ -32,7 +32,7 @@ func getApiRouter(db *database.DB, apiCfg apiConfig) http.Handler {
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", healthzHandler)
 	apiRouter.Post("/chirps", func(w http.ResponseWriter, r *http.Request) {
-		chirpPostHandler(w, r, db)
+		chirpPostHandler(w, r, db, apiCfg.jwtSecret)
 	})
 	apiRouter.Get("/chirps", func(w http.ResponseWriter, r *http.Request) {
 		chirpGetHandler(w, r, db)
@@ -65,10 +65,20 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
-func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
+  token, err := getTokenFromRequest(r, jwtSecret)
+  if err != nil || !token.Valid {
+    respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+    return
+  }
+  userId, err := token.Claims.GetSubject()
+  if err != nil {
+    respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+    return
+  }
 	decoder := json.NewDecoder(r.Body)
 	newChirp := database.Chirp{}
-	err := decoder.Decode(&newChirp)
+	err = decoder.Decode(&newChirp)
 	if err != nil {
 		respondWithErr(w, http.StatusBadRequest, "Something went wrong")
 		return
@@ -80,7 +90,12 @@ func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 	}
 
 	cleanedBody := cleanChirp(newChirp.Body)
-	c, err := db.CreateChirp(cleanedBody)
+  id, err := strconv.Atoi(userId)
+  if err != nil {
+    respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+    return
+  }
+	c, err := db.CreateChirp(cleanedBody, id)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return

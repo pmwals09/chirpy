@@ -48,8 +48,8 @@ func NewDB(path string) (*DB, error) {
 	return &db, nil
 }
 
-func (db *DB) CreateChirp(body string) (Chirp, error) {
-	c := Chirp{Body: body}
+func (db *DB) CreateChirp(body string, userId int) (Chirp, error) {
+  c := Chirp{Body: body, AuthorId: userId}
 	dbStructure, err := db.loadDB()
 	if err != nil {
 		return c, err
