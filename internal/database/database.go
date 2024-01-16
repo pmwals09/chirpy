@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type DB struct {
@@ -15,8 +16,9 @@ type DB struct {
 }
 
 type DBStructure struct {
-	Chirps map[int]Chirp `json:"chirps"`
-	Users  map[int]User  `json:"users"`
+	Chirps               map[int]Chirp              `json:"chirps"`
+	Users                map[int]User               `json:"users"`
+	RevokedRefreshTokens map[string]TokenRevocation `json:"revoked_refresh_tokens"`
 }
 
 type ErrChirpNotFound struct{}
@@ -153,10 +155,36 @@ func (db *DB) UpdateUser(id int, email string, pwHash string) (User, error) {
 	}
 
 }
+func (db *DB) IsRefreshTokenRevoked(tokenString string) (bool, error) {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return false, err
+	}
+	if _, ok := dbStructure.RevokedRefreshTokens[tokenString]; ok {
+		return true, nil
+	}
+	return false, nil
+}
+
+func (db *DB) RevokeRefreshToken(tokenString string) error {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	dbStructure.RevokedRefreshTokens[tokenString] = TokenRevocation{
+		Token:       tokenString,
+		TimeRevoked: time.Now(),
+	}
+	err = db.writeDB(dbStructure)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 func (db *DB) ensureDB() error {
 	if _, err := os.Stat(db.path); errors.Is(err, os.ErrNotExist) {
-		err := os.WriteFile(db.path, []byte("{\"chirps\": {}, \"users\": {}}"), 0644)
+		err := os.WriteFile(db.path, []byte("{\"chirps\": {}, \"users\": {}, \"revoked_refresh_tokens\": {}}"), 0644)
 		if err != nil {
 			return err
 		}

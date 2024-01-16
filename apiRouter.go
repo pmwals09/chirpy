@@ -19,9 +19,8 @@ type errorResponse struct {
 }
 
 type userRequest struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
-	ExpiresInSeconds int    `json:"expires_in_seconds"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type userResponse struct {
@@ -49,6 +48,12 @@ func getApiRouter(db *database.DB, apiCfg apiConfig) http.Handler {
 	})
 	apiRouter.Post("/login", func(w http.ResponseWriter, r *http.Request) {
 		loginPostHandler(w, r, db, apiCfg.jwtSecret)
+	})
+	apiRouter.Post("/refresh", func(w http.ResponseWriter, r *http.Request) {
+		refreshPostHandler(w, r, db, apiCfg.jwtSecret)
+	})
+	apiRouter.Post("/revoke", func(w http.ResponseWriter, r *http.Request) {
+		revokePostHandler(w, r, db, apiCfg.jwtSecret)
 	})
 
 	return apiRouter
@@ -168,19 +173,26 @@ func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 }
 
 func userPutHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
-	// needs auth
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
-	// validate the token
 	tokenString := strings.Split(authHeader, " ")[1]
 	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(jwtSecret), nil
 	})
 	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	if issuer != "chirpy-access" {
 		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
@@ -237,27 +249,30 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, j
 		return
 	}
 
-	defaultExpiration := time.Hour * 24
-	var expiration time.Duration
-	if req.ExpiresInSeconds > 0 {
-		expiration = time.Second * time.Duration(req.ExpiresInSeconds)
-	} else {
-		expiration = defaultExpiration
-	}
-	tokenClaims := jwt.RegisteredClaims{
-		Issuer:    "chirpy",
+	userId := strconv.Itoa(user.Id)
+	accessTokenString, err := getNewAccessTokenString(userId, jwtSecret)
+
+	refreshTokenClaims := jwt.RegisteredClaims{
+		Issuer:    "chirpy-refresh",
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiration)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 60)),
 		Subject:   strconv.Itoa(user.Id),
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, tokenClaims)
-	tokenString, err := token.SignedString([]byte(jwtSecret))
+	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshTokenClaims)
+	refreshTokenString, err := refreshToken.SignedString([]byte(jwtSecret))
+
 	type response struct {
-		Email string `json:"email"`
-		Id    int    `json:"id"`
-		Token string `json:"token"`
+		Email        string `json:"email"`
+		Id           int    `json:"id"`
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
-	data, err := json.Marshal(response{Email: user.Email, Id: user.Id, Token: tokenString})
+	data, err := json.Marshal(response{
+		Email:        user.Email,
+		Id:           user.Id,
+		Token:        accessTokenString,
+		RefreshToken: refreshTokenString,
+	})
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
@@ -265,6 +280,65 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, j
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(data))
+	return
+}
+
+func refreshPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
+	token, err := getTokenFromRequest(r, jwtSecret)
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	isValid := token.Valid
+	issuer, err := token.Claims.GetIssuer()
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	isRefresh := issuer == "chirpy-refresh"
+	isRevoked, err := db.IsRefreshTokenRevoked(token.Raw)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Unauthorized")
+		return
+	}
+	if !isValid || !isRefresh || isRevoked {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	} else {
+		userId, err := token.Claims.GetSubject()
+		if err != nil {
+			respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		newToken, err := getNewAccessTokenString(userId, jwtSecret)
+		if err != nil {
+			respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+			return
+		}
+		data, err := json.Marshal(map[string]string{"token": newToken})
+		if err != nil {
+			respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(data))
+		return
+	}
+}
+
+func revokePostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
+	token, err := getTokenFromRequest(r, jwtSecret)
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	err = db.RevokeRefreshToken(token.Raw)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+	}
+	w.WriteHeader(http.StatusOK)
 	return
 }
 
@@ -293,4 +367,31 @@ func respondWithErr(w http.ResponseWriter, code int, msg string) {
 	data, _ := json.Marshal(err)
 	w.WriteHeader(code)
 	w.Write([]byte(data))
+}
+
+func getNewAccessTokenString(userId string, jwtSecret string) (string, error) {
+	accessTokenClaims := jwt.RegisteredClaims{
+		Issuer:    "chirpy-access",
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		Subject:   userId,
+	}
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessTokenClaims)
+	return accessToken.SignedString([]byte(jwtSecret))
+}
+
+func getTokenFromRequest(r *http.Request, jwtSecret string) (*jwt.Token, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return &jwt.Token{}, errors.New("No auth header")
+	}
+
+	tokenString := strings.Split(authHeader, " ")[1]
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(jwtSecret), nil
+	})
+	if err != nil {
+		return token, err
+	}
+	return token, nil
 }
