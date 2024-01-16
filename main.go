@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
 	"github.com/pmwals09/chirpy/internal/database"
 )
 
@@ -21,8 +22,16 @@ func main() {
 			return
 		}
 	}
+
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(4)
+		return
+	}
+
 	r := chi.NewRouter()
-	apiConfig := apiConfig{}
+	apiConfig := apiConfig{jwtSecret: os.Getenv("JWT_SECRET")}
 	db, err := database.NewDB("./database.json")
 	if err != nil {
 		fmt.Println(err)
@@ -33,7 +42,7 @@ func main() {
 	r.Handle("/app/*", fsHandler)
 	r.Handle("/app", fsHandler)
 
-	r.Mount("/api", getApiRouter(db))
+	r.Mount("/api", getApiRouter(db, apiConfig))
 
 	r.Mount("/admin", getAdminRouter(&apiConfig))
 

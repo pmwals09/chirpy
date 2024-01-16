@@ -31,6 +31,12 @@ func (e ErrUserExists) Error() string {
 	return "User already exists in database"
 }
 
+type ErrUserDoesNotExist struct{}
+
+func (e ErrUserDoesNotExist) Error() string {
+	return "User does not exist in database"
+}
+
 func NewDB(path string) (*DB, error) {
 	db := DB{path: path, mu: &sync.RWMutex{}}
 	err := db.ensureDB()
@@ -126,6 +132,26 @@ func (db *DB) GetUserByEmail(email string) (User, error) {
 		}
 	}
 	return User{}, errors.New("User not found")
+}
+
+func (db *DB) UpdateUser(id int, email string, pwHash string) (User, error) {
+	user := User{Email: email, PasswordHash: pwHash, Id: id}
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return user, err
+	}
+
+	if _, ok := dbStructure.Users[user.Id]; ok {
+		dbStructure.Users[id] = user
+		err := db.writeDB(dbStructure)
+		if err != nil {
+			return user, err
+		}
+		return user, nil
+	} else {
+		return user, ErrUserDoesNotExist{}
+	}
+
 }
 
 func (db *DB) ensureDB() error {

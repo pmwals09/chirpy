@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/pmwals09/chirpy/internal/database"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -16,8 +19,9 @@ type errorResponse struct {
 }
 
 type userRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
 }
 
 type userResponse struct {
@@ -25,7 +29,7 @@ type userResponse struct {
 	Id    int    `json:"id"`
 }
 
-func getApiRouter(db *database.DB) http.Handler {
+func getApiRouter(db *database.DB, apiCfg apiConfig) http.Handler {
 	apiRouter := chi.NewRouter()
 	apiRouter.Get("/healthz", healthzHandler)
 	apiRouter.Post("/chirps", func(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +44,11 @@ func getApiRouter(db *database.DB) http.Handler {
 	apiRouter.Post("/users", func(w http.ResponseWriter, r *http.Request) {
 		userPostHandler(w, r, db)
 	})
+	apiRouter.Put("/users", func(w http.ResponseWriter, r *http.Request) {
+		userPutHandler(w, r, db, apiCfg.jwtSecret)
+	})
 	apiRouter.Post("/login", func(w http.ResponseWriter, r *http.Request) {
-		loginPostHandler(w, r, db)
+		loginPostHandler(w, r, db, apiCfg.jwtSecret)
 	})
 
 	return apiRouter
@@ -160,7 +167,56 @@ func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 	return
 }
 
-func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+func userPutHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
+	// needs auth
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	// validate the token
+	tokenString := strings.Split(authHeader, " ")[1]
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+		return []byte(jwtSecret), nil
+	})
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	newUser := userRequest{}
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&newUser)
+	if err != nil {
+		respondWithErr(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+	userId, err := token.Claims.GetSubject()
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	id, err := strconv.Atoi(userId)
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+	}
+	pwHash, err := bcrypt.GenerateFromPassword([]byte(newUser.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	user, err := db.UpdateUser(id, newUser.Email, string(pwHash))
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	data, err := json.Marshal(userResponse{Email: user.Email, Id: user.Id})
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(data))
+}
+
+func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
 	decoder := json.NewDecoder(r.Body)
 	defer r.Body.Close()
 	req := userRequest{}
@@ -180,7 +236,28 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	data, err := json.Marshal(userResponse{Email: user.Email, Id: user.Id})
+
+	defaultExpiration := time.Hour * 24
+	var expiration time.Duration
+	if req.ExpiresInSeconds > 0 {
+		expiration = time.Second * time.Duration(req.ExpiresInSeconds)
+	} else {
+		expiration = defaultExpiration
+	}
+	tokenClaims := jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiration)),
+		Subject:   strconv.Itoa(user.Id),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, tokenClaims)
+	tokenString, err := token.SignedString([]byte(jwtSecret))
+	type response struct {
+		Email string `json:"email"`
+		Id    int    `json:"id"`
+		Token string `json:"token"`
+	}
+	data, err := json.Marshal(response{Email: user.Email, Id: user.Id, Token: tokenString})
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
