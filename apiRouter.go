@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -418,18 +418,24 @@ func polkaWebhookPostHandler(w http.ResponseWriter, r *http.Request, db *databas
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	err = db.UpgradeUserToRed(webhookReq.Data.UserId)
-	if err != nil {
-		if errors.Is(err, database.ErrUserDoesNotExist{}) {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-	}
-	w.WriteHeader(http.StatusOK)
-	return
+  api := r.Header.Get("Authorization")
+  apiFields := strings.Fields(api)
+  if len(apiFields) == 2 && apiFields[0] == "ApiKey" && apiFields[1] == os.Getenv("POLKA_KEY") {
+    err = db.UpgradeUserToRed(webhookReq.Data.UserId)
+    if err != nil {
+      if errors.Is(err, database.ErrUserDoesNotExist{}) {
+        w.WriteHeader(http.StatusNotFound)
+        return
+      } else {
+        w.WriteHeader(http.StatusInternalServerError)
+        return
+      }
+    }
+    w.WriteHeader(http.StatusOK)
+    return
+  }
+  w.WriteHeader(http.StatusUnauthorized)
+  return
 }
 
 func cleanChirp(chirp string) string {
