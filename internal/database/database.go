@@ -39,6 +39,12 @@ func (e ErrUserDoesNotExist) Error() string {
 	return "User does not exist in database"
 }
 
+type ErrUnauthorized struct{}
+
+func (e ErrUnauthorized) Error() string {
+  return "This user cannot do that"
+}
+
 func NewDB(path string) (*DB, error) {
 	db := DB{path: path, mu: &sync.RWMutex{}}
 	err := db.ensureDB()
@@ -180,6 +186,25 @@ func (db *DB) RevokeRefreshToken(tokenString string) error {
 		return err
 	}
 	return nil
+}
+
+func (db *DB) DeleteChirp(chirpID int, userID int) error {
+  dbStructure, err := db.loadDB()
+  if err != nil {
+    return err
+  }
+
+  chirp := dbStructure.Chirps[chirpID]
+  if chirp.AuthorId == userID {
+    delete(dbStructure.Chirps, chirpID)
+    err = db.writeDB(dbStructure)
+    if err != nil {
+      return err
+    }
+    return nil
+  } else {
+    return ErrUnauthorized{}
+  }
 }
 
 func (db *DB) ensureDB() error {

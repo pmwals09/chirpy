@@ -40,6 +40,9 @@ func getApiRouter(db *database.DB, apiCfg apiConfig) http.Handler {
 	apiRouter.Get("/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
 		chirpGetByIdHandler(w, r, db)
 	})
+	apiRouter.Delete("/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		chirpDeleteByIdHandler(w, r, db, apiCfg.jwtSecret)
+	})
 	apiRouter.Post("/users", func(w http.ResponseWriter, r *http.Request) {
 		userPostHandler(w, r, db)
 	})
@@ -66,16 +69,16 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
-  token, err := getTokenFromRequest(r, jwtSecret)
-  if err != nil || !token.Valid {
-    respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
-    return
-  }
-  userId, err := token.Claims.GetSubject()
-  if err != nil {
-    respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
-    return
-  }
+	token, err := getTokenFromRequest(r, jwtSecret)
+	if err != nil || !token.Valid {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userId, err := token.Claims.GetSubject()
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
 	decoder := json.NewDecoder(r.Body)
 	newChirp := database.Chirp{}
 	err = decoder.Decode(&newChirp)
@@ -90,11 +93,11 @@ func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, j
 	}
 
 	cleanedBody := cleanChirp(newChirp.Body)
-  id, err := strconv.Atoi(userId)
-  if err != nil {
-    respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
-    return
-  }
+	id, err := strconv.Atoi(userId)
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
 	c, err := db.CreateChirp(cleanedBody, id)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
@@ -150,6 +153,38 @@ func chirpGetByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(data))
 	return
+}
+
+func chirpDeleteByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
+  token, err := getTokenFromRequest(r, jwtSecret)
+  if err != nil {
+    respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+    return
+  }
+  chirpID, err := strconv.Atoi(chi.URLParam(r, "chirpID"))
+  if err != nil {
+    respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+    return
+  }
+	userId, err := token.Claims.GetSubject()
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	id, err := strconv.Atoi(userId)
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+	}
+  err = db.DeleteChirp(chirpID, id)
+  if err != nil {
+    if errors.Is(err, database.ErrUnauthorized{}) {
+      respondWithErr(w, http.StatusForbidden, "Unauthorized")
+      return
+    }
+    respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+    return
+  }
+  w.WriteHeader(http.StatusOK)
 }
 
 func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
