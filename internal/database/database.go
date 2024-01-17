@@ -42,7 +42,7 @@ func (e ErrUserDoesNotExist) Error() string {
 type ErrUnauthorized struct{}
 
 func (e ErrUnauthorized) Error() string {
-  return "This user cannot do that"
+	return "This user cannot do that"
 }
 
 func NewDB(path string) (*DB, error) {
@@ -55,7 +55,7 @@ func NewDB(path string) (*DB, error) {
 }
 
 func (db *DB) CreateChirp(body string, userId int) (Chirp, error) {
-  c := Chirp{Body: body, AuthorId: userId}
+	c := Chirp{Body: body, AuthorId: userId}
 	dbStructure, err := db.loadDB()
 	if err != nil {
 		return c, err
@@ -189,22 +189,40 @@ func (db *DB) RevokeRefreshToken(tokenString string) error {
 }
 
 func (db *DB) DeleteChirp(chirpID int, userID int) error {
-  dbStructure, err := db.loadDB()
-  if err != nil {
-    return err
-  }
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
 
-  chirp := dbStructure.Chirps[chirpID]
-  if chirp.AuthorId == userID {
-    delete(dbStructure.Chirps, chirpID)
-    err = db.writeDB(dbStructure)
-    if err != nil {
-      return err
-    }
-    return nil
-  } else {
-    return ErrUnauthorized{}
-  }
+	chirp := dbStructure.Chirps[chirpID]
+	if chirp.AuthorId == userID {
+		delete(dbStructure.Chirps, chirpID)
+		err = db.writeDB(dbStructure)
+		if err != nil {
+			return err
+		}
+		return nil
+	} else {
+		return ErrUnauthorized{}
+	}
+}
+
+func (db *DB) UpgradeUserToRed(userID int) error {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+	if user, ok := dbStructure.Users[userID]; ok {
+		user.IsChirpyRed = true
+		dbStructure.Users[userID] = user
+		err := db.writeDB(dbStructure)
+		if err != nil {
+			return err
+		}
+		return nil
+	} else {
+		return ErrUserDoesNotExist{}
+	}
 }
 
 func (db *DB) ensureDB() error {

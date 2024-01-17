@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,8 +25,9 @@ type userRequest struct {
 }
 
 type userResponse struct {
-	Email string `json:"email"`
-	Id    int    `json:"id"`
+	Email       string `json:"email"`
+	Id          int    `json:"id"`
+	IsChirpyRed bool   `json:"is_chirpy_red"`
 }
 
 func getApiRouter(db *database.DB, apiCfg apiConfig) http.Handler {
@@ -57,6 +59,9 @@ func getApiRouter(db *database.DB, apiCfg apiConfig) http.Handler {
 	})
 	apiRouter.Post("/revoke", func(w http.ResponseWriter, r *http.Request) {
 		revokePostHandler(w, r, db, apiCfg.jwtSecret)
+	})
+	apiRouter.Post("/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		polkaWebhookPostHandler(w, r, db)
 	})
 
 	return apiRouter
@@ -156,16 +161,16 @@ func chirpGetByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB
 }
 
 func chirpDeleteByIdHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwtSecret string) {
-  token, err := getTokenFromRequest(r, jwtSecret)
-  if err != nil {
-    respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
-    return
-  }
-  chirpID, err := strconv.Atoi(chi.URLParam(r, "chirpID"))
-  if err != nil {
-    respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
-    return
-  }
+	token, err := getTokenFromRequest(r, jwtSecret)
+	if err != nil {
+		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	chirpID, err := strconv.Atoi(chi.URLParam(r, "chirpID"))
+	if err != nil {
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
 	userId, err := token.Claims.GetSubject()
 	if err != nil {
 		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
@@ -175,16 +180,16 @@ func chirpDeleteByIdHandler(w http.ResponseWriter, r *http.Request, db *database
 	if err != nil {
 		respondWithErr(w, http.StatusUnauthorized, "Unauthorized")
 	}
-  err = db.DeleteChirp(chirpID, id)
-  if err != nil {
-    if errors.Is(err, database.ErrUnauthorized{}) {
-      respondWithErr(w, http.StatusForbidden, "Unauthorized")
-      return
-    }
-    respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
-    return
-  }
-  w.WriteHeader(http.StatusOK)
+	err = db.DeleteChirp(chirpID, id)
+	if err != nil {
+		if errors.Is(err, database.ErrUnauthorized{}) {
+			respondWithErr(w, http.StatusForbidden, "Unauthorized")
+			return
+		}
+		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
@@ -211,7 +216,7 @@ func userPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 			return
 		}
 	}
-	data, err := json.Marshal(userResponse{Email: u.Email, Id: u.Id})
+	data, err := json.Marshal(userResponse{Email: u.Email, Id: u.Id, IsChirpyRed: u.IsChirpyRed})
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
@@ -272,7 +277,7 @@ func userPutHandler(w http.ResponseWriter, r *http.Request, db *database.DB, jwt
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
 	}
-	data, err := json.Marshal(userResponse{Email: user.Email, Id: user.Id})
+	data, err := json.Marshal(userResponse{Email: user.Email, Id: user.Id, IsChirpyRed: user.IsChirpyRed})
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(data))
@@ -314,12 +319,14 @@ func loginPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, j
 	type response struct {
 		Email        string `json:"email"`
 		Id           int    `json:"id"`
+		IsChirpyRed  bool   `json:"is_chirpy_red"`
 		Token        string `json:"token"`
 		RefreshToken string `json:"refresh_token"`
 	}
 	data, err := json.Marshal(response{
 		Email:        user.Email,
 		Id:           user.Id,
+		IsChirpyRed:  user.IsChirpyRed,
 		Token:        accessTokenString,
 		RefreshToken: refreshTokenString,
 	})
@@ -387,6 +394,39 @@ func revokePostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, 
 	err = db.RevokeRefreshToken(token.Raw)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
+	}
+	w.WriteHeader(http.StatusOK)
+	return
+}
+
+func polkaWebhookPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
+	type webhookdata struct {
+		UserId int `json:"user_id"`
+	}
+	type webhookstruct struct {
+		Event string      `json:"event"`
+		Data  webhookdata `json:"data"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	webhookReq := webhookstruct{}
+	err := decoder.Decode(&webhookReq)
+	if err != nil {
+		respondWithErr(w, http.StatusBadRequest, "Invalid request")
+		return
+	}
+	if webhookReq.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	err = db.UpgradeUserToRed(webhookReq.Data.UserId)
+	if err != nil {
+		if errors.Is(err, database.ErrUserDoesNotExist{}) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusOK)
 	return

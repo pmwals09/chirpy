@@ -1,1 +1,1 @@
-{"chirps":{},"users":{"1":{"email":"walt@breakingbad.com","id":1,"password_hash":"$2a$10$iQRqBT0immoNQFcShx/GWuvEUjLwrBki4Pzbo/VSKhm4TYIReRCry"},"2":{"email":"skyler@breakingbad.com","id":2,"password_hash":"$2a$10$w.YJh7yDB78QBMT5oF..O.aTNmtPThXL3PdTenqD0eotVpMCA1.gm"}},"revoked_refresh_tokens":{}}
+{"chirps":{},"users":{"1":{"email":"walt@breakingbad.com","id":1,"password_hash":"$2a$10$EuLwZBBw2nLtB2Iv4RFdh.z3KSv.83T.oTZIlOjtr8CsQFSxyybC.","is_chirpy_red":true}},"revoked_refresh_tokens":{}}
