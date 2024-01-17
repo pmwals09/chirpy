@@ -74,7 +74,7 @@ func (db *DB) CreateChirp(body string, userId int) (Chirp, error) {
 	return c, nil
 }
 
-func (db *DB) GetChirps(authorIdQp string) ([]Chirp, error) {
+func (db *DB) GetChirps(authorIdQp, sortQp string) ([]Chirp, error) {
 	out := make([]Chirp, 0)
 	dbStructure, err := db.loadDB()
 	if err != nil {
@@ -82,11 +82,18 @@ func (db *DB) GetChirps(authorIdQp string) ([]Chirp, error) {
 	}
 	authorId, err := strconv.Atoi(authorIdQp)
 	for _, chirp := range dbStructure.Chirps {
-		if authorIdQp != "" && err == nil && authorId == chirp.AuthorId {
+		if authorIdQp != "" {
+			if err == nil && authorId == chirp.AuthorId {
+        out = append(out, chirp)
+			}
+		} else {
 			out = append(out, chirp)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if sortQp == "desc" {
+			return out[i].Id > out[j].Id
+		}
 		return out[i].Id < out[j].Id
 	})
 	return out, nil

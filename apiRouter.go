@@ -122,7 +122,8 @@ func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, j
 
 func chirpGetHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
 	authorIdQp := r.URL.Query().Get("author_id")
-	chirps, err := db.GetChirps(authorIdQp)
+  sortQp := r.URL.Query().Get("sort")
+	chirps, err := db.GetChirps(authorIdQp, sortQp)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
