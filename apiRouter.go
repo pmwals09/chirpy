@@ -121,7 +121,8 @@ func chirpPostHandler(w http.ResponseWriter, r *http.Request, db *database.DB, j
 }
 
 func chirpGetHandler(w http.ResponseWriter, r *http.Request, db *database.DB) {
-	chirps, err := db.GetChirps()
+	authorIdQp := r.URL.Query().Get("author_id")
+	chirps, err := db.GetChirps(authorIdQp)
 	if err != nil {
 		respondWithErr(w, http.StatusInternalServerError, "Something went wrong")
 		return
@@ -418,24 +419,24 @@ func polkaWebhookPostHandler(w http.ResponseWriter, r *http.Request, db *databas
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-  api := r.Header.Get("Authorization")
-  apiFields := strings.Fields(api)
-  if len(apiFields) == 2 && apiFields[0] == "ApiKey" && apiFields[1] == os.Getenv("POLKA_KEY") {
-    err = db.UpgradeUserToRed(webhookReq.Data.UserId)
-    if err != nil {
-      if errors.Is(err, database.ErrUserDoesNotExist{}) {
-        w.WriteHeader(http.StatusNotFound)
-        return
-      } else {
-        w.WriteHeader(http.StatusInternalServerError)
-        return
-      }
-    }
-    w.WriteHeader(http.StatusOK)
-    return
-  }
-  w.WriteHeader(http.StatusUnauthorized)
-  return
+	api := r.Header.Get("Authorization")
+	apiFields := strings.Fields(api)
+	if len(apiFields) == 2 && apiFields[0] == "ApiKey" && apiFields[1] == os.Getenv("POLKA_KEY") {
+		err = db.UpgradeUserToRed(webhookReq.Data.UserId)
+		if err != nil {
+			if errors.Is(err, database.ErrUserDoesNotExist{}) {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusUnauthorized)
+	return
 }
 
 func cleanChirp(chirp string) string {
